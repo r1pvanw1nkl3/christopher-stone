@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Type Flyer - ASCII UFO Typing Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #0a0e1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+        }
+
+        #gameCanvas {
+            display: block;
+            background-color: #1a2332;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+    <script>
+        'use strict';
+
+        // ============================================================================
+        // === CONFIGURATION ===========================================================
+        // ============================================================================
+
+        const CONFIG = {
+            canvasWidth: 1280,
+            canvasHeight: 720,
+            groundHeight: 108, // 15% of canvas height
+            groundTopY: 612,   // canvasHeight - groundHeight
+            ufoMaxHeight: 540, // 75% from top
+            ufoGraceHeight: 360, // 50% from top
+            gracePeriodDurationMs: 10000,
+            scrollSpeed: 2,
+            targetFPS: 60,
+            startingWPM: 5,
+            maxWPM: 100,
+            difficultyDurationSeconds: 240,
+            wpmWindowMs: 10000,
+            flashDurationMs: 100,
+            smoothingFactor: 0.004,
+            colors: {
+                sky: '#1a2332',
+                stars: '#f0e68c',
+                ground: '#3d5a3d',
+                ufo: '#c0c0c0',
+                text: '#ffffff',
+                textShadow: '#000000',
+                errorFlash: '#ff0000',
+                typed: '#88ff88',
+                untyped: '#ffffff'
+            }
+        };
+
+        // ============================================================================
+        // === STATE ===================================================================
+        // ============================================================================
+
+        const GameStates = {
+            START_SCREEN: 'START_SCREEN',
+            GRACE_PERIOD: 'GRACE_PERIOD',
+            ACTIVE_PLAY: 'ACTIVE_PLAY',
+            GAME_OVER: 'GAME_OVER'
+        };
+
+        let gameState = null;
+
+        function createInitialState() {
+            return {
+                currentState: GameStates.START_SCREEN,
+                currentWord: '',
+                typedChars: '',
+                startBuffer: '',
+                wordList: [], // Will be populated with filtered words
+                score: 0,
+                startTimeMs: 0,
+                gracePeriodStartMs: 0,
+                keystrokeTimestamps: [],
+                correctKeystrokeCount: 0,
+                totalKeystrokeCount: 0,
+                flashEffectUntilMs: 0,
+                ufoY: CONFIG.ufoGraceHeight,
+                ufoTargetY: CONFIG.ufoGraceHeight,
+                ufoX: CONFIG.canvasWidth * 0.2,
+                ufoWidthPx: ufoWidth,
+                ufoHeightPx: ufoHeight,
+                scrollOffset: 0,
+                currentWPM: 0,
+                targetWPM: CONFIG.startingWPM,
+                lastScoreIncrementMs: 0,
+                landscapeElements: [],
+                stars: []
+            };
+        }
+
+        // ============================================================================
+        // === WORD DICTIONARY =========================================================
+        // ============================================================================
+
+        // Filtered subset of common English words (5-6 characters)
+const WORD_DICTIONARY = [
+    'about', 'above', 'added', 'after', 'again', 'agent', 'agree', 'ahead', 'alarm', 'alive',
+    'allow', 'alone', 'along', 'alter', 'among', 'ample', 'amuse', 'angel', 'anger', 'angle',
+    'angry', 'ankle', 'apart', 'apple', 'apply', 'arena', 'argue', 'arise', 'armed', 'armor',
+    'arose', 'array', 'arrow', 'aside', 'asked', 'asset', 'atoms', 'audio', 'audit', 'avoid',
+    'await', 'awake', 'award', 'aware', 'awful', 'backy', 'badly', 'baked', 'baker', 'balls',
+    'bands', 'banks', 'barely', 'basic', 'basin', 'basis', 'basket', 'batch', 'baths', 'beach',
+    'beads', 'beams', 'beans', 'bears', 'beast', 'beats', 'began', 'begin', 'begun', 'being',
+    'below', 'bench', 'berry', 'bills', 'birds', 'birth', 'black', 'blade', 'blame', 'blank',
+    'blast', 'blaze', 'bleed', 'blend', 'bless', 'blind', 'block', 'blood', 'bloom', 'blown',
+    'board', 'boast', 'boats', 'books', 'boots', 'bored', 'borne', 'bound', 'bowls', 'boxes',
+    'brain', 'brake', 'brand', 'brass', 'brave', 'bread', 'break', 'breed', 'brick', 'bride',
+    'brief', 'bring', 'broad', 'broke', 'brown', 'build', 'built', 'bunch', 'burns', 'burnt',
+    'burst', 'buses', 'buyer', 'cabin', 'cable', 'cakes', 'calls', 'calmly', 'camel', 'camped',
+    'canal', 'candy', 'cards', 'cares', 'cargo', 'carry', 'cases', 'catch', 'cause', 'caves',
+    'cells', 'cents', 'chain', 'chair', 'chalk', 'chaos', 'charm', 'chart', 'chase', 'cheap',
+    'check', 'cheek', 'cheer', 'chess', 'chest', 'chief', 'child', 'chill', 'china', 'chips',
+    'choir', 'chose', 'chunk', 'civic', 'civil', 'claim', 'class', 'clean', 'clear', 'clerk',
+    'click', 'cliff', 'climb', 'clock', 'close', 'cloth', 'cloud', 'coach', 'coast', 'coats',
+    'codes', 'coins', 'color', 'column', 'comes', 'comic', 'coned', 'cooks', 'cools', 'copie',
+    'costs', 'could', 'count', 'court', 'cover', 'crack', 'craft', 'crash', 'crawl', 'crazy',
+    'cream', 'creed', 'creek', 'creep', 'crews', 'cried', 'crimes', 'crops', 'cross', 'crowd',
+    'crown', 'crude', 'cruel', 'crush', 'crust', 'curve', 'cycle', 'daily', 'dairy', 'dance',
+    'dated', 'dates', 'deals', 'death', 'debut', 'delay', 'delta', 'dense', 'depth', 'derby',
+    'desk', 'devil', 'diary', 'digit', 'dirty', 'disks', 'ditch', 'dived', 'dodge', 'doing',
+    'dolls', 'donor', 'doors', 'doubt', 'downs', 'dozen', 'draft', 'drain', 'drama', 'drank',
+    'drawn', 'draws', 'dread', 'dream', 'dress', 'dried', 'drift', 'drill', 'drink', 'drive',
+    'drops', 'drove', 'drown', 'drugs', 'drums', 'drunk', 'ducks', 'dusty', 'dying', 'eager',
+    'eagle', 'early', 'earth', 'eased', 'eases', 'ebony', 'edges', 'eight', 'elect', 'elite',
+    'empty', 'ended', 'enemy', 'enjoy', 'enter', 'entry', 'equal', 'error', 'essay', 'event',
+    'every', 'exact', 'exist', 'extra', 'faint', 'fairy', 'faith', 'falls', 'false', 'famed',
+    'fancy', 'fares', 'farms', 'fatal', 'fault', 'favor', 'fears', 'feast', 'feeds', 'feels',
+    'fence', 'ferry', 'fetch', 'fever', 'fewer', 'fiber', 'field', 'fiery', 'fifth', 'fifty',
+    'fight', 'filed', 'files', 'fills', 'films', 'final', 'finds', 'fined', 'finer', 'fired',
+    'fires', 'first', 'fishy', 'fixed', 'fixes', 'flags', 'flame', 'flash', 'flask', 'flats',
+    'fleet', 'flesh', 'flies', 'float', 'flock', 'flood', 'floor', 'flour', 'flows', 'fluid',
+    'flyer', 'focal', 'focus', 'folks', 'fonts', 'foods', 'force', 'forms', 'forth', 'forty',
+    'forum', 'found', 'fount', 'frame', 'fraud', 'fresh', 'fried', 'front', 'frost', 'frown',
+    'fruit', 'fuels', 'fully', 'funds', 'funny', 'gains', 'games', 'gamma', 'gates', 'gauge',
+    'gears', 'genes', 'ghost', 'giant', 'gifts', 'girls', 'given', 'gives', 'glass', 'globe',
+    'glory', 'gloss', 'glove', 'goals', 'going', 'goods', 'grace', 'grade', 'grain', 'grand',
+    'grant', 'graph', 'grasp', 'grass', 'grave', 'great', 'green', 'greet', 'grief', 'grill',
+    'grind', 'grips', 'gross', 'group', 'grove', 'grown', 'grows', 'guard', 'guess', 'guest',
+    'guide', 'guild', 'guilt', 'habit', 'hairs', 'hairy', 'halls', 'hands', 'handy', 'hangs',
+    'happy', 'harsh', 'hated', 'hates', 'haunt', 'haven', 'heads', 'heard', 'heart', 'heavy',
+    'hedge', 'heels', 'hello', 'helps', 'hence', 'herbs', 'hills', 'hints', 'hired', 'hobby',
+    'holds', 'holes', 'holly', 'homes', 'honey', 'honor', 'hopes', 'horse', 'hotel', 'hours',
+    'house', 'hover', 'human', 'humid', 'humor', 'hurry', 'idols', 'ideal', 'ideas', 'image',
+    'imply', 'index', 'india', 'inner', 'input', 'irony', 'issue', 'items', 'ivory', 'japan',
+    'jeans', 'joint', 'joked', 'jokes', 'judge', 'juice', 'juicy', 'jumps', 'jumpy', 'keeps',
+    'kicks', 'kills', 'kinds', 'kings', 'knees', 'knife', 'knock', 'knots', 'known', 'knows',
+    'label', 'labor', 'lacks', 'lakes', 'lamps', 'lands', 'lanes', 'large', 'laser', 'lasts',
+    'later', 'laugh', 'layer', 'leads', 'leafy', 'learn', 'lease', 'least', 'leave', 'legal',
+    'lemon', 'level', 'lever', 'light', 'liked', 'likes', 'limbs', 'limit', 'lined', 'linen',
+    'lines', 'links', 'lions', 'lists', 'lived', 'liver', 'lives', 'loads', 'loans', 'lobby',
+    'local', 'locks', 'lodge', 'logic', 'logos', 'looks', 'loops', 'loose', 'lords', 'lorry',
+    'loser', 'loses', 'lotus', 'loved', 'lover', 'loves', 'lower', 'loyal', 'lucky', 'lumps',
+    'lunar', 'lunch', 'lungs', 'lying', 'macro', 'magic', 'mails', 'major', 'maker', 'makes',
+    'males', 'mamma', 'manly', 'manor', 'maple', 'march', 'marks', 'marry', 'masks', 'match',
+    'mates', 'maths', 'maybe', 'mayor', 'meals', 'means', 'meant', 'medal', 'media', 'meets',
+    'melon', 'menus', 'mercy', 'merit', 'merry', 'metal', 'meter', 'metro', 'micro', 'midst',
+    'might', 'miles', 'minds', 'mines', 'minor', 'minus', 'mixed', 'mixer', 'mixes', 'model',
+    'modem', 'modes', 'moist', 'money', 'month', 'moody', 'moral', 'motor', 'mount', 'mouse',
+    'mouth', 'moved', 'mover', 'moves', 'movie', 'music', 'named', 'names', 'nasal', 'nasty',
+    'naval', 'needs', 'nerve', 'never', 'newer', 'newly', 'nexus', 'nicer', 'niche', 'night',
+    'ninth', 'noble', 'nodes', 'noise', 'noisy', 'norms', 'north', 'noted', 'notes', 'novel',
+    'nurse', 'nylon', 'oasis', 'ocean', 'offer', 'often', 'older', 'olive', 'onion', 'onset',
+    'opens', 'opera', 'orbit', 'order', 'organ', 'other', 'ought', 'ounce', 'outer', 'owned',
+    'owner', 'oxide', 'packs', 'pages', 'pains', 'paint', 'pairs', 'palms', 'panel', 'panic',
+    'paper', 'parks', 'parts', 'party', 'patch', 'paths', 'patio', 'pause', 'peace', 'peaks',
+    'pearl', 'pedal', 'peers', 'penal', 'penny', 'perch', 'peril', 'phase', 'phone', 'photo',
+    'piano', 'picks', 'piece', 'piles', 'pilot', 'pines', 'pinks', 'pipes', 'pitch', 'pixel',
+    'place', 'plain', 'plane', 'plans', 'plant', 'plate', 'plays', 'plead', 'plots', 'point',
+    'polar', 'poles', 'pools', 'porch', 'ports', 'posed', 'poses', 'posts', 'pouch', 'pound',
+    'power', 'press', 'price', 'pride', 'prime', 'print', 'prior', 'prize', 'probe', 'promo',
+    'proof', 'props', 'proud', 'prove', 'proxy', 'pulse', 'pumps', 'punch', 'pupil', 'puppy',
+    'purely', 'purse', 'query', 'quest', 'queue', 'quick', 'quiet', 'quilt', 'quite', 'quote',
+    'radar', 'radio', 'rails', 'rainy', 'raise', 'rally', 'ranch', 'range', 'rapid', 'ratio',
+    'razor', 'reach', 'react', 'reads', 'ready', 'realm', 'rebel', 'refer', 'reign', 'relax',
+    'relay', 'rely', 'remix', 'renew', 'reply', 'reset', 'resin', 'retro', 'rider', 'rides',
+    'ridge', 'rifle', 'right', 'rigid', 'rings', 'rinse', 'risks', 'risky', 'rival', 'river',
+    'roads', 'robot', 'rocks', 'rocky', 'rogue', 'roles', 'rolls', 'roman', 'roofs', 'rooms',
+    'roots', 'ropes', 'roses', 'rough', 'round', 'route', 'rover', 'rowed', 'royal', 'rugby',
+    'ruins', 'ruled', 'ruler', 'rules', 'rural', 'sacks', 'sadly', 'safer', 'safes', 'sails',
+    'saint', 'salad', 'sales', 'salon', 'sands', 'sandy', 'sauce', 'saved', 'saves', 'scale',
+    'scalp', 'scans', 'scare', 'scene', 'scent', 'scope', 'score', 'scout', 'scrap', 'screw',
+    'seals', 'seams', 'seats', 'seeds', 'seeks', 'seems', 'sells', 'sends', 'sense', 'serum',
+    'serve', 'setup', 'seven', 'sever', 'sewer', 'shade', 'shady', 'shaft', 'shake', 'shaky',
+    'shale', 'shall', 'shame', 'shape', 'share', 'sharp', 'shave', 'sheep', 'sheer', 'sheet',
+    'shelf', 'shell', 'shift', 'shine', 'shiny', 'ships', 'shirt', 'shock', 'shoes', 'shook',
+    'shoot', 'shops', 'shore', 'short', 'shots', 'shout', 'shove', 'shown', 'shows', 'shrub',
+    'shrug', 'shuts', 'sides', 'sight', 'signs', 'silky', 'silly', 'since', 'singe', 'sings',
+    'sites', 'sixth', 'sixty', 'sized', 'sizes', 'skies', 'skill', 'skins', 'skirt', 'skull',
+    'slate', 'slave', 'sleep', 'slept', 'slice', 'slide', 'slight', 'slips', 'slope', 'slots',
+    'slows', 'small', 'smart', 'smell', 'smile', 'smoke', 'smoky', 'snake', 'snaps', 'soapy',
+    'sober', 'socks', 'solar', 'solid', 'solve', 'songs', 'sonic', 'sorry', 'sorts', 'souls',
+    'sound', 'south', 'space', 'spare', 'spark', 'speak', 'specs', 'speed', 'spell', 'spend',
+    'spent', 'sperm', 'spice', 'spicy', 'spied', 'spikes', 'spill', 'spine', 'spite', 'split',
+    'spoil', 'spoke', 'spoon', 'sport', 'spots', 'spray', 'spread', 'spring', 'squad', 'square',
+    'squash', 'stable', 'stack', 'staff', 'stage', 'stain', 'stair', 'stake', 'stale', 'stall',
+    'stamp', 'stand', 'stark', 'stars', 'start', 'state', 'stats', 'stays', 'steak', 'steal',
+    'steam', 'steel', 'steep', 'steer', 'steps', 'stick', 'stiff', 'still', 'sting', 'stock',
+    'stone', 'stony', 'stood', 'stool', 'stops', 'store', 'storm', 'story', 'strap', 'straw',
+    'stray', 'stress', 'strict', 'strike', 'strip', 'strive', 'strong', 'struck', 'study', 'stuff',
+    'style', 'sugar', 'suite', 'suits', 'sunny', 'super', 'surge', 'swamp', 'swear', 'sweat',
+    'sweep', 'sweet', 'swept', 'swift', 'swing', 'swiss', 'sword', 'swore', 'swung', 'table',
+    'taken', 'takes', 'tales', 'talks', 'tanks', 'taped', 'tapes', 'tasks', 'taste', 'tasty',
+    'taxes', 'teach', 'teams', 'tears', 'tease', 'teens', 'teeth', 'tells', 'tempo', 'tends',
+    'tenth', 'tents', 'terms', 'tests', 'texas', 'thank', 'theft', 'their', 'theme', 'there',
+    'these', 'thick', 'thief', 'thigh', 'thing', 'think', 'third', 'those', 'three', 'threw',
+    'throw', 'thumb', 'tiger', 'tight', 'tiles', 'timer', 'times', 'tired', 'tires', 'title',
+    'toast', 'today', 'token', 'tones', 'tools', 'tooth', 'topic', 'torch', 'total', 'touch',
+    'tough', 'tours', 'towel', 'tower', 'towns', 'toxic', 'trace', 'track', 'tract', 'trade',
+    'trail', 'train', 'trait', 'traps', 'trash', 'treat', 'trees', 'trend', 'trial', 'tribe',
+    'trick', 'tried', 'tries', 'trips', 'trout', 'truck', 'truly', 'trunk', 'trust', 'truth',
+    'tubes', 'tulip', 'tuner', 'tunes', 'turbo', 'turns', 'tutor', 'tweet', 'twice', 'twins',
+    'twist', 'tying', 'typed', 'types', 'uncle', 'under', 'union', 'unite', 'units', 'unity',
+    'until', 'upper', 'upset', 'urban', 'usage', 'users', 'using', 'usual', 'vague', 'valid',
+    'value', 'valve', 'vapor', 'vault', 'veins', 'venue', 'verbs', 'verse', 'video', 'views',
+    'villa', 'vinyl', 'viral', 'virus', 'visit', 'vital', 'vivid', 'vocal', 'voice', 'voids',
+    'volts', 'voted', 'voter', 'votes', 'wages', 'wagon', 'waist', 'waits', 'waked', 'walks',
+    'walls', 'wants', 'warns', 'waste', 'watch', 'water', 'watts', 'waves', 'weary', 'weeks',
+    'weigh', 'weird', 'wells', 'welsh', 'whale', 'wheat', 'wheel', 'where', 'which', 'while',
+    'white', 'whole', 'whose', 'wider', 'widow', 'width', 'winds', 'windy', 'wings', 'wired',
+    'wires', 'witch', 'wives', 'woman', 'women', 'woods', 'words', 'works', 'world', 'worms',
+    'worry', 'worse', 'worst', 'worth', 'would', 'wound', 'wrist', 'write', 'wrong', 'wrote',
+    'yacht', 'yards', 'years', 'yeast', 'yield', 'young', 'yours', 'youth', 'zebra', 'zones',
+    'abroad', 'absorb', 'accept', 'access', 'accord', 'across', 'acting', 'action', 'active', 'actual',
+    'advice', 'advise', 'affect', 'afford', 'agency', 'agenda', 'agreed', 'alerts', 'almost', 'always',
+    'amount', 'animal', 'annual', 'answer', 'anyone', 'anyway', 'appeal', 'appear', 'around', 'arrest',
+    'arrive', 'artist', 'aspect', 'assess', 'assist', 'assume', 'attack', 'attend', 'august', 'author',
+    'avenue', 'backed', 'barely', 'battle', 'beauty', 'became', 'become', 'before', 'behalf', 'behind',
+    'belief', 'belong', 'berlin', 'better', 'beyond', 'bishop', 'border', 'bottle', 'bottom', 'bought',
+    'branch', 'breath', 'bridge', 'bright', 'broken', 'budget', 'burden', 'button', 'camera', 'campus',
+    'cancer', 'cannot', 'carbon', 'career', 'castle', 'casual', 'causes', 'center', 'centre', 'chance',
+    'change', 'charge', 'choice', 'choose', 'church', 'circle', 'client', 'closed', 'closer', 'coffee',
+    'column', 'combat', 'comedy', 'common', 'comply', 'copper', 'corner', 'costly', 'county', 'couple',
+    'course', 'covers', 'create', 'credit', 'crisis', 'custom', 'damage', 'danger', 'dealer', 'debate',
+    'decade', 'decide', 'defeat', 'defend', 'define', 'degree', 'demand', 'depend', 'deputy', 'desert',
+    'design', 'desire', 'detail', 'detect', 'device', 'differ', 'dinner', 'direct', 'doctor', 'dollar',
+    'domain', 'double', 'driven', 'driver', 'during', 'easily', 'eating', 'editor', 'effect', 'effort',
+    'eighth', 'either', 'eleven', 'emerge', 'empire', 'employ', 'enable', 'ending', 'energy', 'engine',
+    'enough', 'ensure', 'entire', 'entity', 'equity', 'escape', 'estate', 'ethnic', 'europe', 'events',
+    'eventu', 'everon', 'everyo', 'eviden', 'evolve', 'excess', 'expect', 'expert', 'export', 'extend',
+    'extent', 'fabric', 'facing', 'factor', 'failed', 'fairly', 'fallen', 'family', 'famous', 'father',
+    'fellow', 'female', 'figure', 'filler', 'filter', 'finale', 'finally', 'finish', 'fished', 'flight',
+    'flower', 'flying', 'follow', 'forced', 'forest', 'forget', 'formal', 'format', 'former', 'foster',
+    'fought', 'fourth', 'french', 'friend', 'fronts', 'frozen', 'future', 'garden', 'gather', 'gender',
+    'german', 'global', 'golden', 'ground', 'growth', 'guilty', 'handed', 'handle', 'happen', 'hardly',
+    'health', 'height', 'hidden', 'higher', 'highly', 'hockey', 'holder', 'hollow', 'honest', 'horror',
+    'hospital', 'housing', 'hungry', 'hunter', 'ignore', 'images', 'impact', 'import', 'income', 'indeed',
+    'indoor', 'injury', 'inside', 'intent', 'invest', 'island', 'itself', 'jacket', 'jersey', 'joints',
+    'joseph', 'junior', 'killed', 'knight', 'labels', 'labour', 'ladder', 'ladies', 'laptop', 'larger',
+    'lastly', 'latest', 'launch', 'lawyer', 'leader', 'league', 'leaves', 'legend', 'length', 'lesson',
+    'letter', 'lights', 'likely', 'linked', 'liquid', 'listen', 'little', 'living', 'locals', 'locate',
+    'london', 'lovely', 'loving', 'luxury', 'mainly', 'making', 'manage', 'manner', 'manual', 'margin',
+    'marine', 'marker', 'market', 'marrow', 'master', 'matrix', 'matter', 'mature', 'medium', 'member',
+    'memory', 'mental', 'merely', 'merger', 'method', 'middle', 'miller', 'mining', 'minute', 'mirror',
+    'mobile', 'modern', 'modify', 'module', 'moment', 'monday', 'monkey', 'months', 'mostly', 'mother',
+    'motion', 'motors', 'mounts', 'muscle', 'museum', 'mutual', 'myself', 'narrow', 'nation', 'native',
+    'nature', 'nearby', 'nearly', 'needed', 'needle', 'nelson', 'nephew', 'nervous', 'newest', 'nights',
+    'nobody', 'normal', 'notice', 'notion', 'number', 'object', 'obtain', 'office', 'offset', 'online',
+    'option', 'orange', 'orders', 'origin', 'output', 'oxford', 'packed', 'palace', 'panels', 'parent',
+    'partly', 'patent', 'patrol', 'patron', 'paying', 'people', 'period', 'permit', 'person', 'phrase',
+    'picked', 'planet', 'player', 'please', 'plenty', 'pocket', 'police', 'policy', 'postal', 'posted',
+    'poster', 'potato', 'pounds', 'powder', 'powers', 'preach', 'prefer', 'pretty', 'prices', 'prizes',
+    'profit', 'prompt', 'proper', 'proven', 'public', 'pulled', 'punish', 'purity', 'purple', 'pursue',
+    'pushed', 'puzzle', 'python', 'quartz', 'queens', 'quotes', 'rabbit', 'racing', 'radial', 'radius',
+    'raised', 'random', 'rarely', 'rating', 'rather', 'rating', 'reader', 'really', 'reason', 'recall',
+    'recent', 'record', 'reduce', 'reform', 'regard', 'regime', 'region', 'relate', 'relief', 'remind',
+    'remote', 'remove', 'repair', 'repeat', 'replay', 'report', 'rescue', 'resort', 'result', 'retail',
+    'retain', 'retire', 'return', 'reveal', 'review', 'reward', 'rhythm', 'ribbon', 'riding', 'rights',
+    'rising', 'ritual', 'robust', 'rocket', 'rolled', 'roller', 'romans', 'rounds', 'routes', 'rubber',
+    'rugged', 'ruling', 'safety', 'salary', 'sample', 'saving', 'saying', 'scales', 'scarce', 'scenes',
+    'school', 'scopes', 'scores', 'screen', 'search', 'season', 'second', 'secret', 'sector', 'secure',
+    'seeing', 'select', 'seller', 'senior', 'sensor', 'series', 'server', 'settle', 'severe', 'sexual',
+    'shades', 'shadow', 'shared', 'shares', 'sheets', 'shells', 'shield', 'shifts', 'shined', 'shirts',
+    'shocks', 'should', 'showed', 'shower', 'shrubs', 'signal', 'signed', 'silent', 'silver', 'simple',
+    'simply', 'single', 'sister', 'sketch', 'skills', 'slight', 'slowly', 'smooth', 'social', 'soccer',
+    'socket', 'softly', 'solely', 'solved', 'somany', 'sooner', 'sounds', 'source', 'soviet', 'speech',
+    'speeds', 'spells', 'sphere', 'spirit', 'splits', 'spoken', 'sports', 'spread', 'spring', 'square',
+    'stable', 'stages', 'stairs', 'stakes', 'stamps', 'stance', 'starts', 'stated', 'states', 'static',
+    'statue', 'status', 'stayed', 'steady', 'stereo', 'sticks', 'sticky', 'stocks', 'stolen', 'stones',
+    'stored', 'stores', 'storms', 'strain', 'strand', 'streak', 'stream', 'street', 'stress', 'strict',
+    'strike', 'string', 'strips', 'strive', 'stroke', 'strong', 'struck', 'studio', 'stupid', 'styles',
+    'submit', 'subset', 'subtle', 'suburb', 'suffer', 'suites', 'summer', 'summit', 'sunday', 'sunset',
+    'supply', 'surely', 'survey', 'switch', 'symbol', 'system', 'tables', 'tablet', 'tackle', 'talent',
+    'talked', 'target', 'taught', 'tastes', 'tavern', ' Taylor', 'temple', 'tenant', 'tender', 'tennis',
+    'tenure', 'terror', 'thanks', 'theirs', 'theory', 'thesis', 'things', 'thirst', 'thirty', 'thomas',
+    'though', 'thread', 'threat', 'thrill', 'thrive', 'throat', 'throne', 'thrown', 'ticket', 'tigers',
+    'timely', 'timing', 'tissue', 'titled', 'titles', 'tonight', 'topics', 'topped', 'torque', 'totals',
+    'toward', 'towers', 'topics', 'tracks', 'trader', 'trades', 'tragic', 'trails', 'trains', 'traits',
+    'travel', 'treaty', 'trends', 'trials', 'tribal', 'tribes', 'tricks', 'tricky', 'triple', 'troops',
+    'trophy', 'troupe', 'tunnel', 'turkey', 'turned', 'turtle', 'twenty', 'typing', 'unable', 'unions',
+    'unique', 'united', 'unites', 'unsafe', 'update', 'urgent', 'useful', 'valley', 'values', 'vanish',
+    'varied', 'vector', 'velvet', 'vendor', 'venues', 'versus', 'vessel', 'victim', 'videos', 'viewed',
+    'viewer', 'violin', 'virtue', 'visual', 'voices', 'volume', 'voters', 'voting', 'voyage', 'waited',
+    'waiter', 'walker', 'walked', 'wanted', 'washed', 'washer', 'wastes', 'waters', 'wealth', 'weapon',
+    'weekly', 'weight', 'wheels', 'whilst', 'whites', 'wholly', 'wicked', 'widely', 'window', 'winner',
+    'winter', 'within', 'wizard', 'wolves', 'wooden', 'worker', 'worlds', 'worthy', 'writer', 'writes',
+    'yearly', 'yellow', 'yields', 'youngs', 'youths', 'zombie', 'zodiac'
+];
+
+        // ============================================================================
+        // === PURE FUNCTIONS ==========================================================
+        // ============================================================================
+
+        function selectRandomWord(wordList, targetLength) {
+            if (!wordList || wordList.length === 0) return '';
+
+            // Filter words close to target length (targetLength ± 1)
+            const minLen = targetLength - 1;
+            const maxLen = targetLength + 1;
+            const filtered = wordList.filter(word => word.length >= minLen && word.length <= maxLen);
+
+            if (filtered.length === 0) {
+                // Fallback to any word if no matches
+                return wordList[Math.floor(Math.random() * wordList.length)];
+            }
+
+            return filtered[Math.floor(Math.random() * filtered.length)];
+        }
+
+        function calculateWPM(keystrokeTimestamps, currentTimeMs, windowMs) {
+            if (!keystrokeTimestamps || keystrokeTimestamps.length === 0) {
+                return null;
+            }
+
+            // Filter to only include timestamps within window
+            const windowStartMs = currentTimeMs - windowMs;
+            const recentKeystrokes = keystrokeTimestamps.filter(ks => ks.timeMs >= windowStartMs);
+
+            if (recentKeystrokes.length === 0) {
+                return null;
+            }
+
+            // Check if we have at least 1 second of data
+            const timeSpanMs = currentTimeMs - recentKeystrokes[0].timeMs;
+            if (timeSpanMs < 1000) {
+                return null;
+            }
+
+            // Calculate WPM: (characters / minutes)
+            // Standard: 5 characters = 1 word
+            const charCount = recentKeystrokes.length;
+            const minutes = timeSpanMs / 60000;
+            const wpm = (charCount / 5) / minutes;
+
+            return wpm;
+        }
+
+        function calculateTargetWPM(elapsedSeconds) {
+            // Exponential curve: 30 + 60 * (1 - exp(-3 * progress))
+            // where progress is 0-1 over 120 seconds
+            const progress = Math.min(1, elapsedSeconds / CONFIG.difficultyDurationSeconds);
+            const wpm = CONFIG.startingWPM + (CONFIG.maxWPM - CONFIG.startingWPM) * (1 - Math.exp(-3 * progress));
+            return wpm;
+        }
+
+        function pruneOldKeystrokes(keystrokeTimestamps, currentTimeMs, windowMs) {
+            const windowStartMs = currentTimeMs - windowMs;
+            return keystrokeTimestamps.filter(ks => ks.timeMs >= windowStartMs);
+        }
+
+        function calculateTargetHeight(currentWPM, targetWPM, canvasHeight, inGracePeriod) {
+            // Calculate the Y position based on WPM ratio
+            // Y=540 is the stable hover position when typing AT target WPM
+            // Y=612 is ground (crash)
+            // Y=180 is max ascent (when typing well above target)
+            const ratio = currentWPM / targetWPM;
+
+            let targetHeight;
+            if (ratio >= 1.0) {
+                // Typing at or above target: hover at 540 or ascend higher
+                // ratio = 1.0 → Y=540 (stable hover)
+                // ratio = 1.5+ → Y=180 (max ascent, capped)
+                const ascentAmount = Math.min(ratio - 1.0, 0.5); // Cap at +50% overspeed
+                targetHeight = CONFIG.ufoMaxHeight - (ascentAmount * 720); // 540 - (0 to 360)
+            } else {
+                // Typing below target: descend from 540 toward crash at 612
+                // ratio = 1.0 → Y=540 (hover)
+                // ratio = 0.0 → Y=612 (crash)
+                const descentRatio = 1.0 - ratio; // How far below target (0.0 to 1.0)
+                targetHeight = CONFIG.ufoMaxHeight + (descentRatio * 72); // 540 + (0 to 72)
+            }
+
+            // During grace period, can go up but not below grace height
+            if (inGracePeriod) {
+                targetHeight = Math.min(targetHeight, CONFIG.ufoGraceHeight);
+            }
+
+            return targetHeight;
+        }
+
+        function checkCollision(ufoY, ufoHeightPx, groundTopY) {
+            // ufoY is the CENTER of the UFO (see drawUFO rendering at line 573)
+            // So UFO bottom = center + half height
+            const ufoBottomY = ufoY + (ufoHeightPx / 2);
+            const result = ufoBottomY >= groundTopY;
+            return result;
+        }
+
+        function calculateFinalStats(gameState, currentTimeMs) {
+            const durationSeconds = (currentTimeMs - gameState.startTimeMs) / 1000;
+            const score = Math.floor(durationSeconds);
+
+            // Calculate average WPM across entire session
+            // Use correctKeystrokeCount (not keystrokeTimestamps) because keystrokeTimestamps
+            // is pruned every frame to only contain the last 10 seconds
+            let avgWPM = 0;
+            if (gameState.correctKeystrokeCount > 0) {
+                const totalChars = gameState.correctKeystrokeCount;
+                const durationMinutes = durationSeconds / 60;
+                avgWPM = (totalChars / 5) / durationMinutes;
+            }
+
+            // Calculate accuracy
+            let accuracy = 0;
+            if (gameState.totalKeystrokeCount > 0) {
+                accuracy = (gameState.correctKeystrokeCount / gameState.totalKeystrokeCount) * 100;
+            }
+
+            return {
+                score: score,
+                avgWPM: avgWPM,
+                accuracy: accuracy
+            };
+        }
+
+        // ============================================================================
+        // === TEST INFRASTRUCTURE =====================================================
+        // ============================================================================
+
+        const testResults = [];
+        let testsPassed = 0;
+        let testsFailed = 0;
+
+        function assertEquals(actual, expected, testName) {
+            if (actual === expected) {
+                testResults.push(`✓ ${testName}`);
+                testsPassed++;
+                return true;
+            } else {
+                testResults.push(`✗ ${testName}: expected ${expected}, got ${actual}`);
+                testsFailed++;
+                return false;
+            }
+        }
+
+        function assertClose(actual, expected, tolerance, testName) {
+            if (Math.abs(actual - expected) <= tolerance) {
+                testResults.push(`✓ ${testName}`);
+                testsPassed++;
+                return true;
+            } else {
+                testResults.push(`✗ ${testName}: expected ~${expected}, got ${actual}`);
+                testsFailed++;
+                return false;
+            }
+        }
+
+        function assertTrue(condition, testName) {
+            if (condition) {
+                testResults.push(`✓ ${testName}`);
+                testsPassed++;
+                return true;
+            } else {
+                testResults.push(`✗ ${testName}: condition was false`);
+                testsFailed++;
+                return false;
+            }
+        }
+
+        function simulateKeypress(char) {
+            const event = new KeyboardEvent('keydown', {
+                key: char,
+                code: 'Key' + char.toUpperCase(),
+                keyCode: char.charCodeAt(0),
+                which: char.charCodeAt(0),
+                bubbles: true
+            });
+            document.dispatchEvent(event);
+        }
+
+        function measureFrameTime(callback, frameCount = 60) {
+            const frameTimes = [];
+            let count = 0;
+
+            function measureFrame(timestamp) {
+                const startTime = performance.now();
+                callback();
+                const endTime = performance.now();
+                frameTimes.push(endTime - startTime);
+                count++;
+
+                if (count < frameCount) {
+                    requestAnimationFrame(measureFrame);
+                } else {
+                    const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+                    const max = Math.max(...frameTimes);
+                    console.log(`Average frame time: ${avg.toFixed(2)}ms, Max: ${max.toFixed(2)}ms`);
+                }
+            }
+
+            requestAnimationFrame(measureFrame);
+        }
+
+        function runTests() {
+            console.group('Test Suite');
+            testResults.length = 0;
+            testsPassed = 0;
+            testsFailed = 0;
+
+            // Test helper verification
+            assertEquals(5, 5, 'assertEquals basic test');
+            assertClose(5.1, 5, 0.2, 'assertClose basic test');
+            assertTrue(true, 'assertTrue basic test');
+
+            // Test selectRandomWord
+            const emptyResult = selectRandomWord([], 5);
+            assertEquals(emptyResult, '', 'selectRandomWord with empty list returns empty');
+
+            const singleWord = selectRandomWord(['hello'], 5);
+            assertEquals(singleWord, 'hello', 'selectRandomWord with single word returns that word');
+
+            const testList = ['cat', 'hello', 'world', 'hi', 'testing'];
+            const result = selectRandomWord(testList, 5);
+            assertTrue(result === 'hello' || result === 'world', 'selectRandomWord filters by length (5±1)');
+
+            // Verify word dictionary has enough words
+            assertTrue(WORD_DICTIONARY.length >= 100, 'Word dictionary has at least 100 words');
+
+            // Test calculateWPM
+            assertEquals(calculateWPM([], 1000, 10000), null, 'calculateWPM with empty array returns null');
+            assertEquals(calculateWPM([{char: 'a', timeMs: 500}], 1000, 10000), null, 'calculateWPM with <1s data returns null');
+
+            // Test with 50 keystrokes over 10 seconds (= 60 WPM)
+            const testKeystrokes = [];
+            for (let i = 0; i < 50; i++) {
+                testKeystrokes.push({char: 'a', timeMs: i * 200}); // 200ms apart = 5 chars/sec
+            }
+            const testWPM = calculateWPM(testKeystrokes, 10000, 10000);
+            assertClose(testWPM, 60, 3, 'calculateWPM with 50 chars over 10s ≈ 60 WPM');
+
+            // Test calculateTargetWPM
+            assertClose(calculateTargetWPM(0), 30, 1, 'calculateTargetWPM at t=0 ≈ 30 WPM');
+            assertClose(calculateTargetWPM(60), 65, 3, 'calculateTargetWPM at t=60 ≈ 65 WPM');
+            assertClose(calculateTargetWPM(120), 88, 3, 'calculateTargetWPM at t=120 ≈ 88 WPM');
+
+            // Test keystroke pruning
+            const oldKeystrokes = [
+                {char: 'a', timeMs: 1000},
+                {char: 'b', timeMs: 5000},
+                {char: 'c', timeMs: 12000},
+                {char: 'd', timeMs: 15000}
+            ];
+            const pruned = pruneOldKeystrokes(oldKeystrokes, 16000, 10000);
+            assertEquals(pruned.length, 2, 'pruneOldKeystrokes removes entries older than window');
+
+            // Test calculateTargetHeight
+            assertEquals(calculateTargetHeight(30, 30, 720, true), 360, 'calculateTargetHeight in grace period returns 360px');
+            assertEquals(calculateTargetHeight(60, 30, 720, false), 540, 'calculateTargetHeight WPM >= target returns 540px');
+            assertEquals(calculateTargetHeight(0, 30, 720, false), 108, 'calculateTargetHeight WPM=0 returns minimum (108px)');
+            const midHeight = calculateTargetHeight(45, 60, 720, false);
+            assertTrue(midHeight > 200 && midHeight < 500, 'calculateTargetHeight scales between min and max');
+
+            console.log(`Tests passed: ${testsPassed}, failed: ${testsFailed}`);
+            console.groupEnd();
+
+            const testDiv = document.getElementById('testResults');
+            testDiv.innerHTML = testResults.join('<br>');
+            testDiv.style.display = 'block';
+        }
+
+        // ============================================================================
+        // === ASCII ART ASSETS ========================================================
+        // ============================================================================
+
+        const UFO_ASCII = [
+            '      .-"""-.',
+            '    .\'       \'.',
+            '   /   o   o   \\',
+            '  /_____________\\',
+            ' |~~~~~~~~~~~~~~~|',
+            '  \\___________/',
+            '   v  v  v  v  v'
+        ];
+
+        const GROUND_PATTERN = '~^=^~-=-~^=^~-=~^-';
+
+        // Farm element templates
+        const FARM_ELEMENTS = {
+            tree1: {
+                type: 'tree',
+                art: ['  ***', ' *****', '*******', '   |'],
+                spawnWeight: 30,
+                heightOffset: -60
+            },
+            tree2: {
+                type: 'tree',
+                art: [' ^~^', '^~^~^', '~^~^~', '  |  '],
+                spawnWeight: 30,
+                heightOffset: -55
+            },
+            barn: {
+                type: 'building',
+                art: ['  /\\\\  ', ' /  \\\\ ', '|    |', '|[][]|', '|    |'],
+                spawnWeight: 5,
+                heightOffset: -75
+            },
+            cow: {
+                type: 'animal',
+                art: [' __', '(oo)', '/_|_\\\\'],
+                spawnWeight: 10,
+                heightOffset: -40
+            },
+            chicken: {
+                type: 'animal',
+                art: [' <o>', '  |  '],
+                spawnWeight: 10,
+                heightOffset: -25
+            }
+        };
+
+        const FENCE_PATTERN = '|==|==|==|==|==';
+
+        function generateLandscapeElements() {
+            const elements = [];
+            const zoneWidth = 200;
+            const numZones = Math.ceil(CONFIG.canvasWidth / zoneWidth) + 2; // Extra for off-screen
+
+            let lastBuildingX = -800; // Track last building position
+
+            for (let i = 0; i < numZones; i++) {
+                const zoneX = i * zoneWidth;
+
+                // Random chance to spawn element in this zone
+                if (Math.random() < 0.6) {
+                    // Select element type based on spawn weights
+                    const elementKeys = Object.keys(FARM_ELEMENTS);
+                    const totalWeight = elementKeys.reduce((sum, key) => sum + FARM_ELEMENTS[key].spawnWeight, 0);
+                    let rand = Math.random() * totalWeight;
+
+                    let selectedKey = elementKeys[0];
+                    for (const key of elementKeys) {
+                        rand -= FARM_ELEMENTS[key].spawnWeight;
+                        if (rand <= 0) {
+                            selectedKey = key;
+                            break;
+                        }
+                    }
+
+                    const template = FARM_ELEMENTS[selectedKey];
+
+                    // Enforce building spacing (min 800px apart)
+                    if (template.type === 'building' && zoneX - lastBuildingX < 800) {
+                        continue;
+                    }
+
+                    if (template.type === 'building') {
+                        lastBuildingX = zoneX;
+                    }
+
+                    elements.push({
+                        type: template.type,
+                        art: template.art,
+                        x: zoneX + Math.random() * (zoneWidth - 100),
+                        y: CONFIG.groundTopY + template.heightOffset
+                    });
+                }
+            }
+
+            return elements;
+        }
+
+        // Generate stars
+        function generateStars(count) {
+            const stars = [];
+            for (let i = 0; i < count; i++) {
+                stars.push({
+                    x: Math.random() * CONFIG.canvasWidth,
+                    y: Math.random() * CONFIG.groundTopY, // Only in top 85% of canvas
+                    brightness: 0.3 + Math.random() * 0.7,
+                    twinkleSeed: Math.random() * Math.PI * 2
+                });
+            }
+            return stars;
+        }
+
+        // ============================================================================
+        // === CANVAS AND RENDERING ====================================================
+        // ============================================================================
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+            document.body.innerHTML = '<h1 style="color: #f00;">Canvas not supported by your browser</h1>';
+            throw new Error('Canvas not supported');
+        }
+
+        if (!window.requestAnimationFrame) {
+            document.body.innerHTML = '<h1 style="color: #f00;">requestAnimationFrame not supported by your browser</h1>';
+            throw new Error('requestAnimationFrame not supported');
+        }
+
+        let lastFrameTimeMs = performance.now();
+        let fps = 60;
+        let frameCount = 0;
+        let fpsUpdateTimeMs = performance.now();
+
+        // Calculate UFO dimensions
+        const ufoLineHeight = 18; // Line height for font size 16px
+        const ufoHeight = UFO_ASCII.length * ufoLineHeight;
+        const ufoWidth = Math.max(...UFO_ASCII.map(line => line.length)) * 10; // Approximate width
+
+        function drawUFO(ctx, x, y, ufoArt) {
+            ctx.save();
+            ctx.font = '16px "Courier New", Monaco, monospace';
+            ctx.fillStyle = CONFIG.colors.ufo;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Add glow effect
+            ctx.shadowColor = CONFIG.colors.ufo;
+            ctx.shadowBlur = 10;
+
+            const lineHeight = 18;
+            const startY = y - (ufoArt.length * lineHeight) / 2;
+
+            for (let i = 0; i < ufoArt.length; i++) {
+                ctx.fillText(ufoArt[i], x, startY + i * lineHeight);
+            }
+
+            ctx.restore();
+        }
+
+        function drawGround(ctx, canvasWidth, canvasHeight, groundHeight, scrollOffset) {
+            ctx.save();
+            ctx.font = '16px "Courier New", Monaco, monospace';
+            ctx.fillStyle = CONFIG.colors.ground;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            const groundTopY = canvasHeight - groundHeight;
+            const charWidth = 10; // Approximate character width
+            const patternLength = GROUND_PATTERN.length * charWidth;
+
+            // Calculate offset within pattern for seamless wrapping
+            const offsetInPattern = scrollOffset % patternLength;
+            const lineHeight = 18;
+
+            // Fill ground with repeated pattern
+            for (let y = groundTopY; y < canvasHeight; y += lineHeight) {
+                let x = -offsetInPattern;
+                while (x < canvasWidth) {
+                    ctx.fillText(GROUND_PATTERN, x, y);
+                    x += patternLength;
+                }
+            }
+
+            // Draw solid ground base
+            ctx.fillStyle = CONFIG.colors.ground;
+            ctx.globalAlpha = 0.3;
+            ctx.fillRect(0, groundTopY + 40, canvasWidth, groundHeight - 40);
+            ctx.globalAlpha = 1.0;
+
+            ctx.restore();
+        }
+
+        function drawStars(ctx, stars, currentTimeMs) {
+            ctx.save();
+            ctx.fillStyle = CONFIG.colors.stars;
+
+            for (const star of stars) {
+                // Twinkling effect using sine wave
+                const twinkle = Math.sin(currentTimeMs * 0.001 + star.twinkleSeed) * 0.3 + 0.7;
+                ctx.globalAlpha = star.brightness * twinkle;
+
+                // Draw star as small circle
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.globalAlpha = 1.0;
+            ctx.restore();
+        }
+
+        function drawLandscapeElement(ctx, element) {
+            ctx.save();
+            ctx.font = '16px "Courier New", Monaco, monospace';
+            ctx.fillStyle = element.type === 'building' ? '#8b4513' :
+                           element.type === 'tree' ? '#228b22' :
+                           '#f5f5dc'; // Animals in tan
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            const lineHeight = 18;
+
+            for (let i = 0; i < element.art.length; i++) {
+                ctx.fillText(element.art[i], element.x, element.y + i * lineHeight);
+            }
+
+            ctx.restore();
+        }
+
+        function drawFence(ctx, canvasWidth, groundTopY, scrollOffset) {
+            ctx.save();
+            ctx.font = '16px "Courier New", Monaco, monospace';
+            ctx.fillStyle = '#8b7355';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            const charWidth = 10;
+            const patternLength = FENCE_PATTERN.length * charWidth;
+            const offsetInPattern = scrollOffset % patternLength;
+
+            let x = -offsetInPattern;
+            const fenceY = groundTopY - 20;
+
+            while (x < canvasWidth) {
+                ctx.fillText(FENCE_PATTERN, x, fenceY);
+                x += patternLength;
+            }
+
+            ctx.restore();
+        }
+
+        function updateLandscapeElements(elements, scrollSpeed) {
+            // Move elements left
+            for (const element of elements) {
+                element.x -= scrollSpeed;
+            }
+
+            // Remove off-screen elements (left side)
+            const filtered = elements.filter(el => el.x > -200);
+
+            // Add new elements on right side if needed
+            while (filtered.length < 15) {
+                const elementKeys = Object.keys(FARM_ELEMENTS);
+                const selectedKey = elementKeys[Math.floor(Math.random() * elementKeys.length)];
+                const template = FARM_ELEMENTS[selectedKey];
+
+                filtered.push({
+                    type: template.type,
+                    art: template.art,
+                    x: CONFIG.canvasWidth + Math.random() * 200,
+                    y: CONFIG.groundTopY + template.heightOffset
+                });
+            }
+
+            // Limit to 20 elements max
+            return filtered.slice(0, 20);
+        }
+
+        function gameLoop(currentTimeMs) {
+            const deltaTime = currentTimeMs - lastFrameTimeMs;
+            lastFrameTimeMs = currentTimeMs;
+
+            // Calculate FPS
+            frameCount++;
+            if (currentTimeMs - fpsUpdateTimeMs >= 1000) {
+                fps = frameCount;
+                frameCount = 0;
+                fpsUpdateTimeMs = currentTimeMs;
+            }
+
+            // Update game state
+            updateGame(currentTimeMs, deltaTime);
+
+            // Render
+            render(ctx, currentTimeMs);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateGame(currentTimeMs, deltaTime) {
+            if (!gameState) return;
+
+            // Check for state transitions
+            if (gameState.currentState === GameStates.GRACE_PERIOD) {
+                if (currentTimeMs - gameState.gracePeriodStartMs >= CONFIG.gracePeriodDurationMs) {
+                    const oldState = gameState.currentState;
+                    gameState = {
+                        ...gameState,
+                        currentState: GameStates.ACTIVE_PLAY
+                    };
+                }
+            }
+
+            // Calculate WPM and target WPM during gameplay
+            if (gameState.currentState === GameStates.GRACE_PERIOD ||
+                gameState.currentState === GameStates.ACTIVE_PLAY) {
+
+                // Prune old keystrokes
+                const prunedKeystrokes = pruneOldKeystrokes(
+                    gameState.keystrokeTimestamps,
+                    currentTimeMs,
+                    CONFIG.wpmWindowMs
+                );
+
+                // Calculate current WPM
+                const currentWPM = calculateWPM(prunedKeystrokes, currentTimeMs, CONFIG.wpmWindowMs);
+
+                // Calculate target WPM based on elapsed time
+                const elapsedSeconds = (currentTimeMs - gameState.startTimeMs) / 1000;
+                const targetWPM = calculateTargetWPM(elapsedSeconds);
+
+                // Calculate UFO target height
+                const inGracePeriod = gameState.currentState === GameStates.GRACE_PERIOD;
+                const targetHeight = calculateTargetHeight(
+                    currentWPM || 0,
+                    targetWPM,
+                    CONFIG.canvasHeight,
+                    inGracePeriod
+                );
+
+                // Apply smooth interpolation
+                const currentHeight = gameState.ufoY;
+                const heightDiff = targetHeight - currentHeight;
+                const smoothing = CONFIG.smoothingFactor * deltaTime;
+                const newHeight = currentHeight + heightDiff * smoothing;
+
+                gameState = {
+                    ...gameState,
+                    keystrokeTimestamps: prunedKeystrokes,
+                    currentWPM: currentWPM || 0,
+                    targetWPM: targetWPM,
+                    ufoTargetY: targetHeight,
+                    ufoY: newHeight
+                };
+
+                // Check for collision (only during ACTIVE_PLAY, not grace period)
+                if (gameState.currentState === GameStates.ACTIVE_PLAY) {
+                    if (checkCollision(gameState.ufoY, gameState.ufoHeightPx, CONFIG.groundTopY)) {
+                        // Game over!
+                        const oldState = gameState.currentState;
+                        const finalStats = calculateFinalStats(gameState, currentTimeMs);
+                        gameState = {
+                            ...gameState,
+                            currentState: GameStates.GAME_OVER,
+                            score: finalStats.score,
+                            currentWPM: finalStats.avgWPM,
+                            startBuffer: ''
+                        };
+                        gameState.finalStats = {
+                            score: finalStats.score,
+                            avgWPM: finalStats.avgWPM,
+                            accuracy: finalStats.accuracy
+                        };
+                    }
+                }
+
+                // Update score (increment every second during ACTIVE_PLAY)
+                if (gameState.currentState === GameStates.ACTIVE_PLAY) {
+                    if (currentTimeMs - gameState.lastScoreIncrementMs >= 1000) {
+                        gameState = {
+                            ...gameState,
+                            score: gameState.score + 1,
+                            lastScoreIncrementMs: currentTimeMs
+                        };
+                    }
+                }
+            }
+
+            // Update scroll offset
+            const scrollSpeedAdjusted = CONFIG.scrollSpeed * (deltaTime / 16.67);
+
+            // Update landscape elements (only during gameplay)
+            let updatedElements = gameState.landscapeElements;
+            if (gameState.currentState === GameStates.GRACE_PERIOD ||
+                gameState.currentState === GameStates.ACTIVE_PLAY) {
+                updatedElements = updateLandscapeElements(gameState.landscapeElements, scrollSpeedAdjusted);
+            }
+
+            gameState = {
+                ...gameState,
+                scrollOffset: gameState.scrollOffset + scrollSpeedAdjusted,
+                landscapeElements: updatedElements
+            };
+        }
+
+        function render(ctx, currentTimeMs) {
+            // Clear canvas
+            ctx.fillStyle = CONFIG.colors.sky;
+            ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+
+            // Draw stars
+            if (gameState.stars.length > 0) {
+                drawStars(ctx, gameState.stars, currentTimeMs);
+            }
+
+            // Flash effect
+            if (currentTimeMs < gameState.flashEffectUntilMs) {
+                ctx.fillStyle = CONFIG.colors.errorFlash;
+                ctx.globalAlpha = 0.3;
+                ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+                ctx.globalAlpha = 1.0;
+            }
+
+            // Set default font
+            ctx.font = '16px "Courier New", Monaco, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Render based on game state
+            if (gameState.currentState === GameStates.START_SCREEN) {
+                // Start screen
+                ctx.font = '48px "Courier New", Monaco, monospace';
+                ctx.fillStyle = CONFIG.colors.text;
+                ctx.shadowColor = CONFIG.colors.textShadow;
+                ctx.shadowBlur = 4;
+                ctx.fillText('TYPE FLYER', CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 - 50);
+                ctx.shadowBlur = 0;
+
+                ctx.font = '24px "Courier New", Monaco, monospace';
+                ctx.fillStyle = CONFIG.colors.text;
+                ctx.fillText('Type START to begin', CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 + 50);
+
+                // Show partial typing
+                if (gameState.startBuffer) {
+                    ctx.font = '20px "Courier New", Monaco, monospace';
+                    ctx.fillStyle = CONFIG.colors.typed;
+                    ctx.fillText(gameState.startBuffer, CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 + 100);
+                }
+
+            } else if (gameState.currentState === GameStates.GRACE_PERIOD ||
+                       gameState.currentState === GameStates.ACTIVE_PLAY) {
+                // Draw ground
+                drawGround(ctx, CONFIG.canvasWidth, CONFIG.canvasHeight, CONFIG.groundHeight, gameState.scrollOffset);
+
+                // Draw fence
+                drawFence(ctx, CONFIG.canvasWidth, CONFIG.groundTopY, gameState.scrollOffset);
+
+                // Draw landscape elements
+                for (const element of gameState.landscapeElements) {
+                    drawLandscapeElement(ctx, element);
+                }
+
+                // Draw UFO
+                drawUFO(ctx, gameState.ufoX, gameState.ufoY, UFO_ASCII);
+
+                // Game play - render current word at UFO level
+                const word = gameState.currentWord;
+                const typed = gameState.typedChars;
+
+                ctx.font = '32px "Courier New", Monaco, monospace';
+                ctx.shadowColor = CONFIG.colors.textShadow;
+                ctx.shadowBlur = 3;
+
+                // Render typed portion
+                ctx.fillStyle = CONFIG.colors.typed;
+                ctx.textAlign = 'right';
+                ctx.fillText(typed, CONFIG.canvasWidth / 2, gameState.ufoY);
+
+                // Render untyped portion
+                ctx.fillStyle = CONFIG.colors.untyped;
+                ctx.textAlign = 'left';
+                ctx.fillText(word.substring(typed.length), CONFIG.canvasWidth / 2, gameState.ufoY);
+
+                ctx.shadowBlur = 0;
+
+                // Render WPM display in top-left
+                ctx.textAlign = 'left';
+                ctx.font = '20px "Courier New", Monaco, monospace';
+                ctx.shadowColor = CONFIG.colors.textShadow;
+                ctx.shadowBlur = 2;
+
+                const currentWPMDisplay = gameState.currentWPM.toFixed(1);
+                const targetWPMDisplay = gameState.targetWPM.toFixed(1);
+
+                ctx.fillStyle = CONFIG.colors.text;
+                ctx.fillText(`WPM: ${currentWPMDisplay}`, 20, 30);
+                ctx.fillText(`Target: ${targetWPMDisplay}`, 20, 60);
+
+                ctx.shadowBlur = 0;
+
+                // Render score in top-right during ACTIVE_PLAY
+                if (gameState.currentState === GameStates.ACTIVE_PLAY) {
+                    ctx.textAlign = 'right';
+                    ctx.font = '24px "Courier New", Monaco, monospace';
+                    ctx.fillStyle = CONFIG.colors.text;
+                    ctx.shadowColor = CONFIG.colors.textShadow;
+                    ctx.shadowBlur = 2;
+                    ctx.fillText(`Score: ${gameState.score}`, CONFIG.canvasWidth - 20, 30);
+                    ctx.shadowBlur = 0;
+                }
+
+            } else if (gameState.currentState === GameStates.GAME_OVER) {
+                // Draw ground (frozen)
+                drawGround(ctx, CONFIG.canvasWidth, CONFIG.canvasHeight, CONFIG.groundHeight, gameState.scrollOffset);
+                drawFence(ctx, CONFIG.canvasWidth, CONFIG.groundTopY, gameState.scrollOffset);
+
+                // Draw landscape elements (frozen)
+                for (const element of gameState.landscapeElements) {
+                    drawLandscapeElement(ctx, element);
+                }
+
+                // Draw UFO at crash position
+                drawUFO(ctx, gameState.ufoX, gameState.ufoY, UFO_ASCII);
+
+                // Dim background
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, CONFIG.canvasWidth, CONFIG.canvasHeight);
+
+                // Game over screen
+                ctx.textAlign = 'center';
+                ctx.shadowColor = CONFIG.colors.textShadow;
+                ctx.shadowBlur = 4;
+
+                ctx.font = '64px "Courier New", Monaco, monospace';
+                ctx.fillStyle = '#ff4444';
+                ctx.fillText('GAME OVER', CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 - 120);
+
+                // Stats
+                const stats = gameState.finalStats || {score: 0, avgWPM: 0, accuracy: 0};
+                ctx.font = '32px "Courier New", Monaco, monospace';
+                ctx.fillStyle = CONFIG.colors.text;
+                ctx.fillText(`Score: ${stats.score} seconds`, CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 - 40);
+                ctx.fillText(`Average WPM: ${stats.avgWPM.toFixed(1)}`, CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 + 10);
+                ctx.fillText(`Accuracy: ${stats.accuracy.toFixed(1)}%`, CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 + 60);
+
+                // Restart prompt
+                ctx.font = '24px "Courier New", Monaco, monospace';
+                ctx.fillStyle = CONFIG.colors.typed;
+                ctx.fillText('Type START to play again', CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 + 130);
+
+                // Show partial typing
+                if (gameState.startBuffer) {
+                    ctx.font = '20px "Courier New", Monaco, monospace';
+                    ctx.fillStyle = CONFIG.colors.typed;
+                    ctx.fillText(gameState.startBuffer, CONFIG.canvasWidth / 2, CONFIG.canvasHeight / 2 + 170);
+                }
+
+                ctx.shadowBlur = 0;
+            }
+
+            // All debug elements removed for clean gameplay interface
+        }
+
+        // ============================================================================
+        // === INPUT HANDLING ==========================================================
+        // ============================================================================
+
+        function handleKeyPress(event) {
+            if (!gameState) return;
+
+            // Only handle single character keys
+            if (event.key.length !== 1) return;
+
+            const char = event.key.toLowerCase();
+            const currentTimeMs = performance.now();
+
+            gameState = {
+                ...gameState,
+                totalKeystrokeCount: gameState.totalKeystrokeCount + 1
+            };
+
+            if (gameState.currentState === GameStates.START_SCREEN) {
+                // Handle "start" detection
+                const newBuffer = gameState.startBuffer + char;
+
+                if ('start'.startsWith(newBuffer)) {
+                    gameState = {
+                        ...gameState,
+                        startBuffer: newBuffer,
+                        correctKeystrokeCount: gameState.correctKeystrokeCount + 1
+                    };
+
+                    if (newBuffer === 'start') {
+                        // Transition to GRACE_PERIOD
+                        const oldState = gameState.currentState;
+                        const word = selectRandomWord(WORD_DICTIONARY, 6);
+                        gameState = {
+                            ...gameState,
+                            currentState: GameStates.GRACE_PERIOD,
+                            currentWord: word,
+                            typedChars: '',
+                            startBuffer: '',
+                            startTimeMs: currentTimeMs,
+                            gracePeriodStartMs: currentTimeMs,
+                            lastScoreIncrementMs: currentTimeMs,
+                            keystrokeTimestamps: [],
+                            landscapeElements: generateLandscapeElements()
+                        };
+                        console.log('Transitioned to GRACE_PERIOD, word:', word);
+                    }
+                } else {
+                    // Wrong character, reset buffer
+                    gameState = {
+                        ...gameState,
+                        startBuffer: '',
+                        flashEffectUntilMs: currentTimeMs + CONFIG.flashDurationMs
+                    };
+                }
+
+            } else if (gameState.currentState === GameStates.GRACE_PERIOD ||
+                       gameState.currentState === GameStates.ACTIVE_PLAY) {
+                // Handle word typing
+                const expectedChar = gameState.currentWord[gameState.typedChars.length];
+
+                if (char === expectedChar) {
+                    // Correct character
+                    const newTyped = gameState.typedChars + char;
+
+                    gameState = {
+                        ...gameState,
+                        typedChars: newTyped,
+                        correctKeystrokeCount: gameState.correctKeystrokeCount + 1,
+                        keystrokeTimestamps: [...gameState.keystrokeTimestamps, {
+                            char: char,
+                            timeMs: currentTimeMs
+                        }]
+                    };
+
+                    // Check if word is complete
+                    if (newTyped === gameState.currentWord) {
+                        const word = selectRandomWord(WORD_DICTIONARY, 6);
+                        gameState = {
+                            ...gameState,
+                            currentWord: word,
+                            typedChars: ''
+                        };
+                    }
+                } else {
+                    // Wrong character - reset word
+                    gameState = {
+                        ...gameState,
+                        typedChars: '',
+                        flashEffectUntilMs: currentTimeMs + CONFIG.flashDurationMs
+                    };
+                }
+
+            } else if (gameState.currentState === GameStates.GAME_OVER) {
+                // Handle restart
+                const newBuffer = gameState.startBuffer + char;
+
+                if ('start'.startsWith(newBuffer)) {
+                    gameState = {
+                        ...gameState,
+                        startBuffer: newBuffer
+                    };
+
+                    if (newBuffer === 'start') {
+                        // Reset to initial state
+                        const oldState = gameState.currentState;
+                        const stars = gameState.stars; // Preserve stars
+                        gameState = createInitialState();
+                        gameState.stars = stars;
+
+                        const word = selectRandomWord(WORD_DICTIONARY, 6);
+                        gameState = {
+                            ...gameState,
+                            currentState: GameStates.GRACE_PERIOD,
+                            currentWord: word,
+                            startTimeMs: currentTimeMs,
+                            gracePeriodStartMs: currentTimeMs,
+                            lastScoreIncrementMs: currentTimeMs,
+                            landscapeElements: generateLandscapeElements()
+                        };
+                        console.log('Game restarted');
+                    }
+                } else {
+                    gameState = {
+                        ...gameState,
+                        startBuffer: ''
+                    };
+                }
+            }
+        }
+
+        // ============================================================================
+        // === INITIALIZATION ==========================================================
+        // ============================================================================
+
+        function init() {
+            console.log('Type Flyer initializing...');
+            console.log('Canvas:', CONFIG.canvasWidth, 'x', CONFIG.canvasHeight);
+            console.log('Browser:', navigator.userAgent.includes('Chrome') ? 'Chrome' :
+                                    navigator.userAgent.includes('Firefox') ? 'Firefox' :
+                                    navigator.userAgent.includes('Safari') ? 'Safari' : 'Other');
+
+            gameState = createInitialState();
+
+            // Generate stars (once, persists across restarts)
+            gameState.stars = generateStars(120);
+
+            // Set up input handling (single event listener, persists across restarts)
+            document.addEventListener('keydown', handleKeyPress);
+
+            // Run tests
+            // runTests();
+
+            // Start game loop
+            requestAnimationFrame(gameLoop);
+
+            console.log('Type Flyer initialized successfully');
+        }
+
+        // Start the game when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
